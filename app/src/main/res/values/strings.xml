@@ -1,6 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">Quran</string>
+
+  <!--
+    Replace these strings inside <resources> in:
+      app/src/main/res/values/strings.xml
+
+    If you previously added the older fulani_* strings, overwrite them with the
+    updated values below. The new strings (fulani_pick_nisf, fulani_verses_*,
+    fulani_nisf_entry, fulani_track_label) are required by the two-level picker.
+
+    Placeholders:
+      %1$d  first integer  (surah number, verse, nisf, MediaPlayer "what" code…)
+      %2$d  second integer (verse, nisf, MediaPlayer "extra" code…)
+      %3$d  third integer  (nisf when used after surah + name)
+      %1$s  first string   (track/surah label, surah name, error message)
+      %2$s  second string  (coverage description, surah name)
+  -->
+
+  <!-- Menu label: now honours the reciter by name. -->
+  <string name="fulani_audio">Sheikh Abdullah Kaala — Tafsir Pular</string>
+
+  <!-- First dialog (surah picker) title -->
+  <string name="fulani_pick_surah">Select a surah</string>
+  <string name="fulani_surah_not_covered">Sheikh Kaala has not recorded surah %1$d yet.</string>
+
+
+  <!-- Second dialog (nisf picker) title: "Surah 2. Al-Baqarah — select a nisf" -->
+  <string name="fulani_pick_nisf">Surah %1$d. %2$s — select a nisf</string>
+
+  <!-- Coverage labels used inside the nisf list -->
+  <string name="fulani_verses_range">Verses %1$d–%2$d</string>
+  <string name="fulani_verses_from">From verse %1$d (continues to next surah)</string>
+  <string name="fulani_verses_until">Up to verse %1$d (continued from previous surah)</string>
+  <string name="fulani_verses_full">Full surah</string>
+
+  <!-- Nisf list entry: "Nisf 12 • Verses 1–24" -->
+  <string name="fulani_nisf_entry">Nisf %1$d • %2$s</string>
+
+  <!-- Toast/track label: "Surah 2 Al-Baqarah · Nisf 12" -->
+  <string name="fulani_track_label">Surah %1$d %2$s · Nisf %3$d</string>
+
+  <!-- Status messages -->
+  <string name="fulani_no_tracks">No Fulani audio is available right now.</string>
+  <string name="fulani_loading">Loading: %1$s…</string>
+  <string name="fulani_playing">Playing %1$s</string>
+  <string name="fulani_load_error">Couldn\'t load Fulani audio: %1$s</string>
+  <string name="fulani_playback_error">Playback error (%1$d / %2$d)</string>
+  <string name="fulani_stop">Stop</string>
+
+
+  <string name="app_name">Tafsir Pular</string>
   <string name="downloadPrompt_title">Download Required Files?</string>
   <string name="downloadPrompt">In order for Quran Android to work properly,
         we need to download some files. If you do not do this now, the app
@@ -400,4 +449,22 @@
   <!-- notification channel names [CHAR LIMIT=40] -->
   <string name="notification_channel_download">Quran Downloads</string>
   <string name="notification_channel_audio">Quran Recitation</string>
+
+<string name="about_pular_project">
+This application was developed by Cherinor Umaru Bah based on the open-source Android Quran project, with integration of Tafsir Quran in Pular. Approximately 95% of the Tafsir audio has been integrated into the app. Special credit goes to Sheikh Abdullah Kaala for the Pular translation and Tafsir.
+</string>
+  <string name="fulani_now_playing">Now playing</string>
+  <string name="fulani_play">▶</string>
+  <string name="fulani_pause">⏸</string>
+  <string name="fulani_loading_short">Loading…</string>
+  <string name="fulani_playing_short">Playing</string>
+  <string name="fulani_finished">Finished</string>
+  <string name="donate_menu">Donate to Mosque</string>
+  <string name="donate_dialog_title">Support the Mosque Project</string>
+  <string name="donate_dialog_message">This will open PayPal in your browser to contribute to the mosque project. May Allah accept your donation.</string>
+  <string name="donate_dialog_open">Open PayPal</string>
+<string name="tafsir_pular_contact_email">Contact: bahumaru37@gmail.com</string>
+  <string name="about_tafsir_pular_section">Tafsir Pular</string>
+  <string name="about_kaala_title">Sheikh Abdullah Kaala</string>
+  <string name="about_kaala_summary">Recitation and tafsir of the Holy Quran in Fulani (Pular). May Allah reward him for making the recitation accessible to Fulani-speakers worldwide.</string>
 </resources>

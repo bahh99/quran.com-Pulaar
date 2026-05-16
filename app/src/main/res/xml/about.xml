@@ -6,6 +6,17 @@
   <com.quran.labs.androidquran.ui.preference.QuranHeaderPreference
       android:summary="@string/about_description"
       android:title="@string/app_name"/>
+  <PreferenceCategory
+      android:title="@string/about_tafsir_pular_section"
+      app:iconSpaceReserved="false">
+
+    <Preference
+        android:summary="@string/about_kaala_summary"
+        android:title="@string/about_kaala_title"
+        app:iconSpaceReserved="false"
+        app:singleLineTitle="false" />
+  </PreferenceCategory>
+
 
   <PreferenceCategory
       android:key="aboutDataSources"
@@ -228,5 +239,7 @@
           android:action="android.intent.action.VIEW"
           android:data="@string/about_contributors_url"/>
     </Preference>
+
   </PreferenceCategory>
+
 </PreferenceScreen>

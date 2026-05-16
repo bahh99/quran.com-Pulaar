@@ -69,6 +69,14 @@ class MadaniPageProvider : PageProvider {
         path = "2",
         hasGaplessAlternative = false,
         db = null
+      ),
+      Qari(
+        3,
+        audioR.string.qari_kaala_tafsir_pular,
+        url = "https://pub-3059b47aefff4962baaf555118627f70.r2.dev/",
+        path = "kaala_pular",
+        hasGaplessAlternative = false,
+        db = "kaala_pular"
       )
     )
   }

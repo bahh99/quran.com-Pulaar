@@ -159,6 +159,12 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import android.media.MediaPlayer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.URL
+import com.quran.labs.androidquran.ui.helpers.FulaniPlaybackController
 
 /**
  * Activity that displays the Quran (in Arabic or translation mode).
@@ -234,6 +240,11 @@ class PagerActivity : AppCompatActivity(), AudioBarListener, OnBookmarkTagsUpdat
   @Inject lateinit var audioBarEventRepository: AudioBarEventRepository
   @Inject lateinit var downloadInfoStreams: DownloadInfoStreams
   @Inject lateinit var qariManager: CurrentQariManager
+
+  // Sheikh Kaala / Fulani audio state (separate from the standard audio service)
+    private val fulaniPlaybackController by lazy { FulaniPlaybackController(this) }
+  private var fulaniMediaPlayer: MediaPlayer? = null
+  private var fulaniIndexCache: List<FulaniTrack>? = null
   @Inject lateinit var downloadBridge: DownloadBridge
 
   private lateinit var audioStatusRepositoryBridge: AudioStatusRepositoryBridge
@@ -1103,7 +1114,8 @@ class PagerActivity : AppCompatActivity(), AudioBarListener, OnBookmarkTagsUpdat
   }
 
   override fun onDestroy() {
-    Timber.d("onDestroy()")
+        fulaniPlaybackController.release()
+Timber.d("onDestroy()")
     clearUiVisibilityListener()
 
     translationJob?.cancel(CancellationException())
@@ -1483,7 +1495,16 @@ class PagerActivity : AppCompatActivity(), AudioBarListener, OnBookmarkTagsUpdat
   }
 
   override fun onPlayPressed() {
-    val position = viewPager.currentItem
+        // Sheikh Kaala uses chunk-based audio; route to the Fulani nisf picker.
+    if (qariManager.currentQari().id == FULANI_KAALA_QARI_ID) {
+      val position = viewPager.currentItem
+      val page = quranInfo.getPageFromPosition(position, isDualPageVisible)
+      val startSura = quranDisplayData.safelyGetSuraOnPage(page)
+      showFulaniNisfPickerForSurah(startSura)
+      return
+    }
+    
+val position = viewPager.currentItem
     val page = quranInfo.getPageFromPosition(position, isDualPageVisible)
 
     // log the event
@@ -1970,8 +1991,135 @@ class PagerActivity : AppCompatActivity(), AudioBarListener, OnBookmarkTagsUpdat
     override fun onPanelAnchored(panel: View) {
     }
   }
+  // region Sheikh Kaala / Fulani audio (chunk-based playback)
+
+  private data class FulaniTrack(
+    val file: String,
+    val nisf: Int,
+    val startSurah: Int,
+    val startVerse: Int,
+    val endSurah: Int,
+    val endVerse: Int
+  )
+
+  private suspend fun loadFulaniIndex(): List<FulaniTrack> {
+    fulaniIndexCache?.let { return it }
+    return withContext(Dispatchers.IO) {
+      val url = URL(FULANI_INDEX_URL)
+      val text = url.readText()
+      val json = JSONObject(text)
+      val files = json.getJSONArray("files")
+      val list = ArrayList<FulaniTrack>(files.length())
+      for (i in 0 until files.length()) {
+        val obj = files.getJSONObject(i)
+        list.add(
+          FulaniTrack(
+            file = obj.getString("file"),
+            nisf = obj.optInt("nisf", 0),
+            startSurah = obj.getInt("startSurah"),
+            startVerse = obj.getInt("startVerse"),
+            endSurah = obj.getInt("endSurah"),
+            endVerse = obj.getInt("endVerse")
+          )
+        )
+      }
+      fulaniIndexCache = list
+      list
+    }
+  }
+
+  private fun showFulaniNisfPickerForSurah(surah: Int) {
+    lifecycleScope.launch {
+      try {
+        val tracks = loadFulaniIndex().filter {
+          it.startSurah <= surah && surah <= it.endSurah
+        }
+        if (tracks.isEmpty()) {
+          Toast.makeText(
+            this@PagerActivity,
+            getString(R.string.fulani_surah_not_covered, surah),
+            Toast.LENGTH_LONG
+          ).show()
+          return@launch
+        }
+        val surahName = FULANI_SURAH_NAMES.getOrNull(surah - 1) ?: ""
+        val labels = tracks.map { track ->
+          val coverage = when {
+            track.startSurah == surah && track.endSurah == surah ->
+              getString(R.string.fulani_verses_range, track.startVerse, track.endVerse)
+            track.startSurah == surah ->
+              getString(R.string.fulani_verses_from, track.startVerse)
+            track.endSurah == surah ->
+              getString(R.string.fulani_verses_until, track.endVerse)
+            else ->
+              getString(R.string.fulani_verses_full)
+          }
+          getString(R.string.fulani_nisf_entry, track.nisf, coverage)
+        }.toTypedArray()
+        AlertDialog.Builder(this@PagerActivity)
+          .setTitle(getString(R.string.fulani_pick_nisf, surah, surahName))
+          .setItems(labels) { _, which -> playFulaniTrack(tracks[which], surah) }
+          .setNegativeButton(android.R.string.cancel, null)
+          .setNeutralButton(R.string.fulani_stop) { _, _ -> stopFulaniAudio() }
+          .show()
+      } catch (e: Exception) {
+        Toast.makeText(
+          this@PagerActivity,
+          getString(R.string.fulani_load_error, e.message ?: ""),
+          Toast.LENGTH_LONG
+        ).show()
+      }
+    }
+  }
+
+  private fun playFulaniTrack(track: FulaniTrack, surah: Int) {
+    val audioUrl = FULANI_BASE_URL + track.file
+    val surahName = FULANI_SURAH_NAMES.getOrNull(surah - 1) ?: ""
+    val label = getString(R.string.fulani_track_label, surah, surahName, track.nisf)
+    fulaniPlaybackController.play(audioUrl, label)
+  }
+
+  private fun stopFulaniAudio() {
+    fulaniPlaybackController.stop()
+  }
+
+  // endregion
+
 
   companion object {
+
+    private const val FULANI_KAALA_QARI_ID = 3
+    private const val FULANI_BASE_URL =
+      "https://pub-3059b47aefff4962baaf555118627f70.r2.dev/"
+    private const val FULANI_INDEX_URL =
+      FULANI_BASE_URL + "fulani-audio-index.json"
+
+    /** Surah names (mushaf order, index 0..113 for surahs 1..114). */
+    private val FULANI_SURAH_NAMES = listOf(
+      "Al-Fātihah", "Al-Baqarah", "Āli ʿImrān", "An-Nisāʾ", "Al-Māʾidah",
+      "Al-Anʿām", "Al-Aʿrāf", "Al-Anfāl", "At-Tawbah", "Yūnus",
+      "Hūd", "Yūsuf", "Ar-Raʿd", "Ibrāhīm", "Al-Hijr",
+      "An-Nahl", "Al-Isrāʾ", "Al-Kahf", "Maryam", "Tāhā",
+      "Al-Anbiyāʾ", "Al-Hajj", "Al-Muʾminūn", "An-Nūr", "Al-Furqān",
+      "Ash-Shuʿarāʾ", "An-Naml", "Al-Qasas", "Al-ʿAnkabūt", "Ar-Rūm",
+      "Luqmān", "As-Sajdah", "Al-Ahzāb", "Sabaʾ", "Fātir",
+      "Yāsīn", "As-Sāffāt", "Sād", "Az-Zumar", "Ghāfir",
+      "Fussilat", "Ash-Shūrā", "Az-Zukhruf", "Ad-Dukhān", "Al-Jāthiyah",
+      "Al-Ahqāf", "Muhammad", "Al-Fath", "Al-Hujurāt", "Qāf",
+      "Adh-Dhāriyāt", "At-Tūr", "An-Najm", "Al-Qamar", "Ar-Rahmān",
+      "Al-Wāqiʿah", "Al-Hadīd", "Al-Mujādilah", "Al-Hashr", "Al-Mumtahanah",
+      "As-Saff", "Al-Jumuʿah", "Al-Munāfiqūn", "At-Taghābun", "At-Talāq",
+      "At-Tahrīm", "Al-Mulk", "Al-Qalam", "Al-Hāqqah", "Al-Maʿārij",
+      "Nūh", "Al-Jinn", "Al-Muzzammil", "Al-Muddaththir", "Al-Qiyāmah",
+      "Al-Insān", "Al-Mursalāt", "An-Nabaʾ", "An-Nāziʿāt", "ʿAbasa",
+      "At-Takwīr", "Al-Infitār", "Al-Mutaffifīn", "Al-Inshiqāq", "Al-Burūj",
+      "At-Tāriq", "Al-Aʿlā", "Al-Ghāshiyah", "Al-Fajr", "Al-Balad",
+      "Ash-Shams", "Al-Layl", "Ad-Duhā", "Ash-Sharh", "At-Tīn",
+      "Al-ʿAlaq", "Al-Qadr", "Al-Bayyinah", "Az-Zalzalah", "Al-ʿĀdiyāt",
+      "Al-Qāriʿah", "At-Takāthur", "Al-ʿAsr", "Al-Humazah", "Al-Fīl",
+      "Quraysh", "Al-Māʿūn", "Al-Kawthar", "Al-Kāfirūn", "An-Nasr",
+      "Al-Masad", "Al-Ikhlās", "Al-Falaq", "An-Nās"
+    )
     private const val AUDIO_DOWNLOAD_KEY = "AUDIO_DOWNLOAD_KEY"
     private const val LAST_READ_PAGE = "LAST_READ_PAGE"
     private const val LAST_READING_MODE_IS_TRANSLATION = "LAST_READING_MODE_IS_TRANSLATION"

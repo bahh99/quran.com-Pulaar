@@ -6,12 +6,14 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
@@ -28,6 +30,7 @@ import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.FragmentPagerAdapter
+import androidx.lifecycle.lifecycleScope
 import androidx.viewpager.widget.ViewPager
 import com.quran.labs.androidquran.AboutUsActivity
 import com.quran.labs.androidquran.HelpActivity
@@ -35,6 +38,7 @@ import com.quran.labs.androidquran.QuranApplication
 import com.quran.labs.androidquran.QuranPreferenceActivity
 import com.quran.labs.androidquran.R
 import com.quran.labs.androidquran.SearchActivity
+import com.quran.labs.androidquran.common.audio.repository.CurrentQariManager
 import com.quran.labs.androidquran.ShortcutsActivity
 import com.quran.labs.androidquran.data.Constants
 import com.quran.labs.androidquran.model.bookmark.RecentPageModel
@@ -60,8 +64,16 @@ import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.CompositeDisposable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.URL
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import kotlin.math.abs
+import com.quran.labs.androidquran.ui.helpers.FulaniPlaybackController
 
 /**
  * The home screen activity for the app. Displays a toolbar and 3 fragments:
@@ -78,8 +90,8 @@ import kotlin.math.abs
  *  * [ShortcutsActivity]
  */
 class QuranActivity : AppCompatActivity(),
-    OnBookmarkTagsUpdateListener,
-    JumpDestination {
+  OnBookmarkTagsUpdateListener,
+  JumpDestination {
   private var upgradeDialog: AlertDialog? = null
   private var showedTranslationUpgradeDialog = false
   private var isRtl = false
@@ -93,6 +105,11 @@ class QuranActivity : AppCompatActivity(),
   private lateinit var searchItemCollapserCallback: OnBackPressedCallback
   private lateinit var supportActionModeClearingCallback: OnBackPressedCallback
 
+  // Fulani audio state
+    private val fulaniPlaybackController by lazy { FulaniPlaybackController(this) }
+  private var fulaniMediaPlayer: MediaPlayer? = null
+  private var fulaniIndexCache: List<FulaniTrack>? = null
+
   @Inject
   lateinit var settings: QuranSettings
   @Inject
@@ -105,12 +122,15 @@ class QuranActivity : AppCompatActivity(),
   lateinit var quranIndexEventLogger: QuranIndexEventLogger
   @Inject
   lateinit var extraScreens: Set<@JvmSuppressWildcards ExtraScreenProvider>
+  @Inject
+  lateinit var currentQariManager: CurrentQariManager
 
   private var jumpToPageOnResume: Int? = null
 
   public override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+
     val quranApp = application as QuranApplication
     quranApp.applicationComponent
       .activityComponentFactory()
@@ -159,7 +179,7 @@ class QuranActivity : AppCompatActivity(),
 
     if (savedInstanceState != null) {
       showedTranslationUpgradeDialog = savedInstanceState.getBoolean(
-          SI_SHOWED_UPGRADE_DIALOG, false
+        SI_SHOWED_UPGRADE_DIALOG, false
       )
     }
 
@@ -180,6 +200,179 @@ class QuranActivity : AppCompatActivity(),
     }
     updateTranslationsListAsNeeded()
     quranIndexEventLogger.logAnalytics()
+    observeKaalaQariSelection()
+  }
+
+  /**
+   * Observes the current-qari flow. When the user picks Sheikh Kaala from the
+   * standard qari list, this opens the surah/nisf picker — the same one the
+   * three-dot menu item uses. drop(1) skips the initial saved value so we don't
+   * pop the dialog on app launch when Kaala happens to already be selected.
+   */
+  private fun observeKaalaQariSelection() {
+    lifecycleScope.launch {
+      currentQariManager.flow()
+        .distinctUntilChanged { a, b -> a.id == b.id }
+        .drop(1)
+        .collect { qari ->
+          if (qari.id == FULANI_KAALA_QARI_ID) {
+            showFulaniSurahPicker()
+          }
+        }
+    }
+  }
+
+  /**
+   * Data class describing a single Fulani audio track in the remote index.
+   * Each track is an audio chunk that covers a contiguous verse range, possibly
+   * spanning a surah boundary.
+   */
+  private data class FulaniTrack(
+    val file: String,
+    val nisf: Int,
+    val startSurah: Int,
+    val startVerse: Int,
+    val endSurah: Int,
+    val endVerse: Int
+  )
+
+  /**
+   * Loads (and caches) the remote Fulani audio index. Safe to call from a coroutine.
+   * The cache lasts for the lifetime of the activity.
+   */
+  private suspend fun loadFulaniIndex(): List<FulaniTrack> {
+    fulaniIndexCache?.let { return it }
+    return withContext(Dispatchers.IO) {
+      val url = URL(FULANI_INDEX_URL)
+      val text = url.readText()
+      val json = JSONObject(text)
+      val files = json.getJSONArray("files")
+      val list = ArrayList<FulaniTrack>(files.length())
+      for (i in 0 until files.length()) {
+        val obj = files.getJSONObject(i)
+        list.add(
+          FulaniTrack(
+            file = obj.getString("file"),
+            nisf = obj.optInt("nisf", 0),
+            startSurah = obj.getInt("startSurah"),
+            startVerse = obj.getInt("startVerse"),
+            endSurah = obj.getInt("endSurah"),
+            endVerse = obj.getInt("endVerse")
+          )
+        )
+      }
+      fulaniIndexCache = list
+      list
+    }
+  }
+
+  /**
+   * Shows the surah picker dialog. Selecting a surah opens a second dialog
+   * listing the nisf tracks that cover that surah.
+   */
+  private fun showFulaniSurahPicker() {
+    lifecycleScope.launch {
+      try {
+        val tracks = loadFulaniIndex()
+        if (tracks.isEmpty()) {
+          Toast.makeText(
+            this@QuranActivity,
+            R.string.fulani_no_tracks,
+            Toast.LENGTH_SHORT
+          ).show()
+          return@launch
+        }
+
+        // Build map: surah number -> list of tracks that include any of its verses.
+        val surahToTracks = sortedMapOf<Int, MutableList<FulaniTrack>>()
+        for (track in tracks) {
+          for (surah in track.startSurah..track.endSurah) {
+            surahToTracks.getOrPut(surah) { mutableListOf() }.add(track)
+          }
+        }
+
+        val coveredSurahs = surahToTracks.keys.toList()
+        val labels = coveredSurahs.map { surahNum ->
+          val name = SURAH_NAMES.getOrNull(surahNum - 1) ?: ""
+          "$surahNum. $name"
+        }.toTypedArray()
+
+        Builder(this@QuranActivity)
+          .setTitle(R.string.fulani_pick_surah)
+          .setItems(labels) { _, which ->
+            val pickedSurah = coveredSurahs[which]
+            val tracksForSurah = surahToTracks.getValue(pickedSurah)
+            if (tracksForSurah.size == 1) {
+              // Single chunk for this surah — play directly, no second dialog needed.
+              playFulaniTrack(tracksForSurah[0], pickedSurah)
+            } else {
+              showFulaniNisfPicker(pickedSurah, tracksForSurah)
+            }
+          }
+          .setNegativeButton(android.R.string.cancel, null)
+          .setNeutralButton(R.string.fulani_stop) { _, _ -> stopFulaniAudio() }
+          .show()
+      } catch (e: Exception) {
+        Toast.makeText(
+          this@QuranActivity,
+          getString(R.string.fulani_load_error, e.message ?: ""),
+          Toast.LENGTH_LONG
+        ).show()
+      }
+    }
+  }
+
+  /**
+   * Shows the nisf picker for a chosen surah. Each row describes the verse range
+   * the chunk covers (relative to the picked surah) and which nisf it belongs to.
+   */
+  private fun showFulaniNisfPicker(surah: Int, tracks: List<FulaniTrack>) {
+    val labels = tracks.map { track -> nisfLabel(track, surah) }.toTypedArray()
+    val surahName = SURAH_NAMES.getOrNull(surah - 1) ?: ""
+    Builder(this@QuranActivity)
+      .setTitle(getString(R.string.fulani_pick_nisf, surah, surahName))
+      .setItems(labels) { _, which ->
+        playFulaniTrack(tracks[which], surah)
+      }
+      .setNegativeButton(android.R.string.cancel, null)
+      .setNeutralButton(R.string.fulani_stop) { _, _ -> stopFulaniAudio() }
+      .show()
+  }
+
+  /**
+   * Builds a human-readable label for a track in the context of a particular surah.
+   * Handles tracks that start, end, or span across the surah boundary.
+   */
+  private fun nisfLabel(track: FulaniTrack, surah: Int): String {
+    val coverage = when {
+      track.startSurah == surah && track.endSurah == surah ->
+        getString(R.string.fulani_verses_range, track.startVerse, track.endVerse)
+      track.startSurah == surah ->
+        getString(R.string.fulani_verses_from, track.startVerse)
+      track.endSurah == surah ->
+        getString(R.string.fulani_verses_until, track.endVerse)
+      else ->
+        getString(R.string.fulani_verses_full)
+    }
+    return getString(R.string.fulani_nisf_entry, track.nisf, coverage)
+  }
+
+  /**
+   * Plays a single Fulani track. Stops and releases any previously-playing track first.
+   * The [surah] is used only to build a friendly label for the toast messages.
+   */
+  private fun playFulaniTrack(track: FulaniTrack, surah: Int) {
+    val audioUrl = FULANI_BASE_URL + track.file
+    val surahName = SURAH_NAMES.getOrNull(surah - 1) ?: ""
+    val label = getString(R.string.fulani_track_label, surah, surahName, track.nisf)
+    fulaniPlaybackController.play(audioUrl, label)
+  }
+
+  /**
+   * Stops and releases the Fulani MediaPlayer if it exists. Safe to call multiple times.
+   */
+  private fun stopFulaniAudio() {
+    fulaniPlaybackController.stop()
   }
 
   public override fun onResume() {
@@ -198,18 +391,18 @@ class QuranActivity : AppCompatActivity(),
       }
 
       compositeDisposable.add(
-          Completable.timer(500, MILLISECONDS)
-              .observeOn(AndroidSchedulers.mainThread())
-              .subscribe {
-                try {
-                  startService(
-                    audioUtils.getAudioIntent(this@QuranActivity, AudioService.ACTION_STOP)
-                  )
-                } catch (_: IllegalStateException) {
-                  // do nothing, we might be in the background
-                  // onPause should have stopped us from needing this, but it sometimes happens
-                }
-              }
+        Completable.timer(500, MILLISECONDS)
+          .observeOn(AndroidSchedulers.mainThread())
+          .subscribe {
+            try {
+              startService(
+                audioUtils.getAudioIntent(this@QuranActivity, AudioService.ACTION_STOP)
+              )
+            } catch (_: IllegalStateException) {
+              // do nothing, we might be in the background
+              // onPause should have stopped us from needing this, but it sometimes happens
+            }
+          }
       )
     }
     isPaused = false
@@ -222,6 +415,9 @@ class QuranActivity : AppCompatActivity(),
   }
 
   override fun onDestroy() {
+        fulaniPlaybackController.release()
+// stop any Fulani audio playback so the MediaPlayer isn't leaked
+    stopFulaniAudio()
     // only set to handle Android Q memory leaks
     backStackListener?.let {
       supportFragmentManager.removeOnBackStackChangedListener(it)
@@ -299,9 +495,9 @@ class QuranActivity : AppCompatActivity(),
     val searchManager = getSystemService(Context.SEARCH_SERVICE) as SearchManager
     searchView.queryHint = getString(R.string.search_hint)
     searchView.setSearchableInfo(
-        searchManager.getSearchableInfo(
-            ComponentName(this, SearchActivity::class.java)
-        )
+      searchManager.getSearchableInfo(
+        ComponentName(this, SearchActivity::class.java)
+      )
     )
 
     // Add additional injected screens (if any)
@@ -328,6 +524,25 @@ class QuranActivity : AppCompatActivity(),
       }
       R.id.jump -> {
         gotoPageDialog()
+      }
+      R.id.donate -> {
+        Builder(this)
+          .setTitle(R.string.donate_dialog_title)
+          .setMessage(R.string.donate_dialog_message)
+          .setPositiveButton(R.string.donate_dialog_open) { _, _ ->
+            val donateIntent = Intent(Intent.ACTION_VIEW)
+            donateIntent.data = "https://www.paypal.com/pools/c/9p9iqugWoJ".toUri()
+            try {
+              startActivity(donateIntent)
+            } catch (_: android.content.ActivityNotFoundException) {
+              // No browser available — silently ignore.
+            }
+          }
+          .setNegativeButton(android.R.string.cancel, null)
+          .show()
+      }
+      R.id.fulani_audio -> {
+        showFulaniSurahPicker()
       }
       R.id.other_apps -> {
         val intent = Intent(Intent.ACTION_VIEW)
@@ -379,21 +594,21 @@ class QuranActivity : AppCompatActivity(),
 
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putBoolean(
-        SI_SHOWED_UPGRADE_DIALOG,
-        showedTranslationUpgradeDialog
+      SI_SHOWED_UPGRADE_DIALOG,
+      showedTranslationUpgradeDialog
     )
     super.onSaveInstanceState(outState)
   }
 
   private fun jumpToLastPage() {
     compositeDisposable.add(
-        latestPageObservable
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe { recentPage: Int ->
-              jumpTo(
-                  if (recentPage == Constants.NO_PAGE) 1 else recentPage
-              )
-            }
+      latestPageObservable
+        .observeOn(AndroidSchedulers.mainThread())
+        .subscribe { recentPage: Int ->
+          jumpTo(
+            if (recentPage == Constants.NO_PAGE) 1 else recentPage
+          )
+        }
     )
   }
 
@@ -502,7 +717,7 @@ class QuranActivity : AppCompatActivity(),
   }
 
   private inner class PagerAdapter(fm: FragmentManager) :
-      FragmentPagerAdapter(fm) {
+    FragmentPagerAdapter(fm) {
 
     override fun getCount() = 3
 
@@ -537,14 +752,14 @@ class QuranActivity : AppCompatActivity(),
 
   companion object {
     private val TITLES = intArrayOf(
-        R.string.quran_sura,
-        R.string.quran_juz2,
-        R.string.menu_bookmarks
+      R.string.quran_sura,
+      R.string.quran_juz2,
+      R.string.menu_bookmarks
     )
     private val ARABIC_TITLES = intArrayOf(
-        R.string.menu_bookmarks,
-        R.string.quran_juz2,
-        R.string.quran_sura
+      R.string.menu_bookmarks,
+      R.string.quran_juz2,
+      R.string.quran_sura
     )
     const val EXTRA_SHOW_TRANSLATION_UPGRADE = "transUp"
     private const val SI_SHOWED_UPGRADE_DIALOG = "si_showed_dialog"
@@ -552,5 +767,43 @@ class QuranActivity : AppCompatActivity(),
     private const val JUZ2_LIST = 1
     private const val BOOKMARKS_LIST = 2
     private var updatedTranslations = false
+
+    private const val FULANI_KAALA_QARI_ID = 3
+
+    private const val FULANI_BASE_URL =
+      "https://pub-3059b47aefff4962baaf555118627f70.r2.dev/"
+    private const val FULANI_INDEX_URL =
+      FULANI_BASE_URL + "fulani-audio-index.json"
+
+    /**
+     * Transliterated surah names (mushaf order, indexed 0..113 for surahs 1..114).
+     * If your project already exposes a surah-name array elsewhere, swap this for
+     * `resources.getStringArray(R.array.sura_names)` and delete this constant.
+     */
+    private val SURAH_NAMES = listOf(
+      "Al-Fātihah", "Al-Baqarah", "Āli ʿImrān", "An-Nisāʾ", "Al-Māʾidah",
+      "Al-Anʿām", "Al-Aʿrāf", "Al-Anfāl", "At-Tawbah", "Yūnus",
+      "Hūd", "Yūsuf", "Ar-Raʿd", "Ibrāhīm", "Al-Hijr",
+      "An-Nahl", "Al-Isrāʾ", "Al-Kahf", "Maryam", "Tāhā",
+      "Al-Anbiyāʾ", "Al-Hajj", "Al-Muʾminūn", "An-Nūr", "Al-Furqān",
+      "Ash-Shuʿarāʾ", "An-Naml", "Al-Qasas", "Al-ʿAnkabūt", "Ar-Rūm",
+      "Luqmān", "As-Sajdah", "Al-Ahzāb", "Sabaʾ", "Fātir",
+      "Yāsīn", "As-Sāffāt", "Sād", "Az-Zumar", "Ghāfir",
+      "Fussilat", "Ash-Shūrā", "Az-Zukhruf", "Ad-Dukhān", "Al-Jāthiyah",
+      "Al-Ahqāf", "Muhammad", "Al-Fath", "Al-Hujurāt", "Qāf",
+      "Adh-Dhāriyāt", "At-Tūr", "An-Najm", "Al-Qamar", "Ar-Rahmān",
+      "Al-Wāqiʿah", "Al-Hadīd", "Al-Mujādilah", "Al-Hashr", "Al-Mumtahanah",
+      "As-Saff", "Al-Jumuʿah", "Al-Munāfiqūn", "At-Taghābun", "At-Talāq",
+      "At-Tahrīm", "Al-Mulk", "Al-Qalam", "Al-Hāqqah", "Al-Maʿārij",
+      "Nūh", "Al-Jinn", "Al-Muzzammil", "Al-Muddaththir", "Al-Qiyāmah",
+      "Al-Insān", "Al-Mursalāt", "An-Nabaʾ", "An-Nāziʿāt", "ʿAbasa",
+      "At-Takwīr", "Al-Infitār", "Al-Mutaffifīn", "Al-Inshiqāq", "Al-Burūj",
+      "At-Tāriq", "Al-Aʿlā", "Al-Ghāshiyah", "Al-Fajr", "Al-Balad",
+      "Ash-Shams", "Al-Layl", "Ad-Duhā", "Ash-Sharh", "At-Tīn",
+      "Al-ʿAlaq", "Al-Qadr", "Al-Bayyinah", "Az-Zalzalah", "Al-ʿĀdiyāt",
+      "Al-Qāriʿah", "At-Takāthur", "Al-ʿAsr", "Al-Humazah", "Al-Fīl",
+      "Quraysh", "Al-Māʿūn", "Al-Kawthar", "Al-Kāfirūn", "An-Nasr",
+      "Al-Masad", "Al-Ikhlās", "Al-Falaq", "An-Nās"
+    )
   }
 }
