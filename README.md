@@ -1,26 +1,50 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/quran/quran_android/main/app/src/madani/res/drawable-xxhdpi/icon.png" alt='Quran for Android logo'/>
+<img src="app/icon_source/icon_source.png" alt="Quran et Tafsir - Pular logo" width="180"/>
 
-# Quran for Android
+# Quran et Tafsir - Pular
 
-[![Build Status](https://github.com/quran/quran_android/actions/workflows/build.yml/badge.svg)](https://github.com/quran/quran_android/actions/workflows/build.yml)
-[![Version](https://img.shields.io/github/v/release/quran/quran_android?include_prereleases&sort=semver)](https://github.com/quran/quran_android/releases/latest)
-[![Github Downloads](https://img.shields.io/github/downloads/quran/quran_android/total?logo=Github)](https://github.com/quran/quran_android/releases)
+A free, open-source Android app for reading the Quran with **Tafsir in Pular (Fulani)**, including audio by Sheikh Abdullah Kaala.
 
-This is a simple (Madani based) Quran app for Android.
+[![Download](https://img.shields.io/badge/Download-latest%20release-2E7D32?logo=android)](https://github.com/bahh99/quran.com-Pulaar/releases/latest)
 
-[<img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png"
-      alt='Get it on Google Play'
-      height="80">](https://play.google.com/store/apps/details?id=com.quran.labs.androidquran)
-[<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroid.png"
-      alt="Get it at IzzyOnDroid"
-      height="80">](https://apt.izzysoft.de/packages/com.quran.labs.androidquran)
-[<img src="https://user-images.githubusercontent.com/69304392/148696068-0cfea65d-b18f-4685-82b5-329a330b1c0d.png"
-      alt='Get it on GitHub'
-      height="80">](https://github.com/quran/quran_android/releases/latest)
+</div>
 
-<div align="left">
+## What it does
+
+* Quran pages (Madani) with Tafsir in Pular
+* Fulani audio you can pick per surah and per section, with a playback bar that stays on screen
+* Audio keeps playing when you rotate the phone
+* Free, with no ads
+
+## Install
+
+1. Open the [latest release](https://github.com/bahh99/quran.com-Pulaar/releases/latest) on your Android phone.
+2. Download the `.apk` file.
+3. Open it. If Android asks, allow "Install unknown apps" for your browser or file manager.
+
+## Support the project
+
+Hosting the audio costs money every month. If the app is useful to you, you can help cover the hosting costs through PayPal: *(link coming soon)*. The project is non-profit.
+
+## Build it yourself
+
+```bash
+./gradlew assembleMadaniDebug     # debug build
+./release.sh                      # signed release build (needs your own signing key)
+```
+
+The release script expects `signing/keystore.properties` with `STORE_FILE`, `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. Keep that file and your key private and out of git.
+
+## Feedback and collaboration
+
+Found a bug or want to help? Open an issue or a pull request on this repository.
+
+## About this project
+
+Quran et Tafsir - Pular is a fork of [Quran for Android](https://github.com/quran/quran_android) and is released under the same GPL 3 licence. Thank you to the original developers and contributors. The text below is from the original project.
+
+---
 
 ## Credits
 

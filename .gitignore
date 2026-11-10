@@ -24,3 +24,8 @@ extras
 app/google-services.json
 # Local Gradle daemon JVM config (IDE-generated)
 gradle/gradle-daemon-jvm.properties
+
+# release signing key and passwords - never commit
+signing/
+*.jks
+*.keystore

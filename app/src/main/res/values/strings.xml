@@ -466,5 +466,7 @@ This application was developed by Cherinor Umaru Bah based on the open-source An
 <string name="tafsir_pular_contact_email">Contact: bahumaru37@gmail.com</string>
   <string name="about_tafsir_pular_section">Tafsir Pular</string>
   <string name="about_kaala_title">Sheikh Abdullah Kaala</string>
-  <string name="about_kaala_summary">Recitation and tafsir of the Holy Quran in Fulani (Pular). May Allah reward him for making the recitation accessible to Fulani-speakers worldwide.</string>
+  <string name="about_kaala_summary">Recitation and tafsir of the Holy Quran in Fulani, specifically Guinea Fula (Pular of Guinea). Fulani has many dialects, and this tafsir is in the Guinea Fula dialect. May Allah reward him for making the Quran accessible to Fulani speakers worldwide.</string>
+  <string name="about_developer_title">About the developer</string>
+  <string name="about_developer_summary">Developed by Cherinor Umaru Bah. As a modern Muslim, this is a little contribution for the Fulani Ummah, built on the open-source Quran for Android project. Please do not forget him in your du\'as.\n\nContact: bahumaru37@gmail.com</string>
 </resources>
