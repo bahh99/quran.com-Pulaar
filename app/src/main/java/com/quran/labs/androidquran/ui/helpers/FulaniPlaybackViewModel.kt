@@ -64,8 +64,14 @@ class FulaniPlaybackViewModel : ViewModel() {
       onChanged?.invoke()
       true
     }
+    try {
+      mp.prepareAsync()
+    } catch (e: IllegalStateException) {
+      releasePlayer()
+      loadError = e.message ?: ""
+      state = State.ERROR
+    }
     onChanged?.invoke()
-    mp.prepareAsync()
   }
 
   fun togglePlayPause() {
@@ -90,9 +96,16 @@ class FulaniPlaybackViewModel : ViewModel() {
     }
   }
 
-  fun position(): Int = try { player?.currentPosition ?: 0 } catch (_: IllegalStateException) { 0 }
+  // MediaPlayer must not be asked for position/duration before it is prepared:
+  // doing so puts it in the Error state and the next call throws.
+  private val isPrepared: Boolean
+    get() = state == State.PLAYING || state == State.PAUSED || state == State.FINISHED
 
-  fun duration(): Int = try { player?.duration ?: 0 } catch (_: IllegalStateException) { 0 }
+  fun position(): Int =
+    if (!isPrepared) 0 else try { player?.currentPosition ?: 0 } catch (_: IllegalStateException) { 0 }
+
+  fun duration(): Int =
+    if (!isPrepared) 0 else try { player?.duration ?: 0 } catch (_: IllegalStateException) { 0 }
 
   /** Stops playback and clears the session. */
   fun stop() {
