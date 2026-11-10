@@ -126,9 +126,9 @@ androidComponents {
     if (variant.applicationId.get().endsWith("debug")) {
       val name = variant.flavorName ?: variant.name
       variant.manifestPlaceholders.put("app_debug_label",
-        "Quran ${name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }}")
+        "Quran et Tafsir - Pular")
       (variant as? HasUnitTest)?.unitTest?.manifestPlaceholders?.put("app_debug_label",
-          "Quran ${name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }}"
+          "Quran et Tafsir - Pular"
       )
     }
   }

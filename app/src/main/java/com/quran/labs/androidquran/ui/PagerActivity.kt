@@ -902,6 +902,8 @@ class PagerActivity : AppCompatActivity(), AudioBarListener, OnBookmarkTagsUpdat
 
   public override fun onResume() {
     super.onResume()
+    // re-show the Fulani playback bar immediately after rotation / returning to the app
+    fulaniPlaybackController.attach()
 
     audioPresenter.bind(this)
     recentPagePresenter.bind(currentPageFlow)
@@ -1114,8 +1116,9 @@ class PagerActivity : AppCompatActivity(), AudioBarListener, OnBookmarkTagsUpdat
   }
 
   override fun onDestroy() {
-        fulaniPlaybackController.release()
-Timber.d("onDestroy()")
+    // keeps Fulani audio playing across rotation; stops it only on a real exit
+    fulaniPlaybackController.release()
+    Timber.d("onDestroy()")
     clearUiVisibilityListener()
 
     translationJob?.cancel(CancellationException())
